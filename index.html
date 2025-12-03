@@ -249,11 +249,11 @@
         const ENCELADUS_ORBIT_RADIUS = 3.948;
         const ENCELADUS_SIZE = 0.08;
         
-        // Create Saturn texture procedurally with banded colors
+        // Create Saturn texture procedurally with banded colors and latitude labels
         function createSaturnTexture() {
             const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 256;
+            canvas.width = 1024;  // Higher res for labels
+            canvas.height = 512;
             const ctx = canvas.getContext('2d');
             
             // Saturn's characteristic colors - golden/tan with subtle bands
@@ -297,6 +297,23 @@
             }
             ctx.putImageData(imageData, 0, 0);
             
+            // Add latitude labels baked into texture at 45°N and 45°S
+            // Texture coordinates: x = longitude (0-1024), y = latitude (0=north pole, 512=south pole)
+            // 45°N is at y = 0.25 * 512 = 128, 45°S is at y = 0.75 * 512 = 384
+            ctx.font = 'bold 21px Arial';  // Reduced by 25% from 28px
+            ctx.fillStyle = '#000000';     // Black labels
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            // 3 labels at 120° intervals for each latitude
+            const y45N = 128;  // 45°N
+            const y45S = 384;  // 45°S
+            for (let i = 0; i < 3; i++) {
+                const x = (i * 341) + 170;  // 1024/3 ≈ 341, offset by half
+                ctx.fillText('45°N', x, y45N);
+                ctx.fillText('45°S', x, y45S);
+            }
+            
             const texture = new THREE.CanvasTexture(canvas);
             texture.wrapS = THREE.RepeatWrapping;
             return texture;
@@ -337,17 +354,9 @@
             }
             
             const geometry = new THREE.BufferGeometry().setFromPoints(points);
-            const material = new THREE.LineBasicMaterial({ color: 0xffff00 });
+            const material = new THREE.LineBasicMaterial({ color: 0x000000 });  // Black latitude circles
             scene.add(new THREE.Line(geometry, material));
-            
-            // Add latitude label
-            const labelDiv = document.createElement('div');
-            labelDiv.textContent = latitudeDeg > 0 ? `${latitudeDeg}°N` : `${Math.abs(latitudeDeg)}°S`;
-            labelDiv.style.cssText = 'color:#ffff00;font-size:12px;text-shadow:0 0 4px #000;font-weight:bold;';
-            const label = new CSS2DObject(labelDiv);
-            // Position label at front of planet (z = radius)
-            label.position.set(0, y + 0.15, radius + 0.1);
-            scene.add(label);
+            // Labels are now baked into Saturn's texture
         }
         
         function createRings() {
@@ -412,6 +421,8 @@
             }
             
             console.log('Found flux tube L-shell:', closestL);
+            // Store the L value of the data we found for scaling
+            if (closestData) closestData.foundL = closestL;
             return closestData;
         }
         
@@ -431,9 +442,15 @@
             const lineData = fluxTubeData.lines[0];
             if (!lineData || lineData.length < 5) return;
             
+            // Scale factor to adjust the field line to pass exactly through Enceladus
+            // The field line data is at L=fluxTubeData.L, but Enceladus is at L=3.948
+            const dataL = fluxTubeData.L || fluxTubeData.foundL || ENCELADUS_L_SHELL;
+            const scaleFactor = ENCELADUS_L_SHELL / dataL;
+            
             const positions = [];
             for (const p of lineData) {
-                positions.push(p[0], p[1], p[2]);
+                // Scale x and z (horizontal) to match Enceladus L-shell
+                positions.push(p[0] * scaleFactor, p[1], p[2] * scaleFactor);
             }
             
             const geometry = new LineGeometry();
@@ -541,15 +558,36 @@
             
             const totalLines = allLines.length;
             
+            // Helper to extend a point to reach the oblate Saturn surface
+            function extendToSurface(point) {
+                const x = point[0], y = point[1], z = point[2];
+                // Saturn surface: x² + z² + (y/0.902)² = 1
+                // Find scale factor s such that (sx)² + (sz)² + (sy/0.902)² = 1
+                const a = x*x + z*z + (y/0.902)*(y/0.902);
+                if (a < 0.001) return [x, y, z];
+                const s = 1.0 / Math.sqrt(a);
+                return [x * s, y * s, z * s];
+            }
+            
             for (let i = 0; i < numLongitudes; i++) {
                 const lineIndex = Math.floor((i * totalLines) / numLongitudes) % totalLines;
                 const pointsData = allLines[lineIndex];
                 
                 if (pointsData && pointsData.length > 5) {
                     const positions = [];
+                    
+                    // Extend first point to surface
+                    const startExt = extendToSurface(pointsData[0]);
+                    positions.push(startExt[0], startExt[1], startExt[2]);
+                    
+                    // Add all middle points
                     for (const p of pointsData) {
                         positions.push(p[0], p[1], p[2]);
                     }
+                    
+                    // Extend last point to surface
+                    const endExt = extendToSurface(pointsData[pointsData.length - 1]);
+                    positions.push(endExt[0], endExt[1], endExt[2]);
                     
                     const geometry = new LineGeometry();
                     geometry.setPositions(positions);
