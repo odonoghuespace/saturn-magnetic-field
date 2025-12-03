@@ -2,7 +2,7 @@
 
 An interactive 3D web visualization of Saturn's magnetic field, featuring real magnetic field line traces computed using the **Cassini 11** spherical harmonic model.
 
-🔗 **[Live Demo](https://YOUR_USERNAME.github.io/saturn-magnetic-field/)** *(update with your URL)*
+🔗 **[Live Demo](https://odonoghuespace.github.io/saturn-magnetic-field/)** *(update with your URL)*
 
 ![Saturn Magnetic Field](https://upload.wikimedia.org/wikipedia/commons/thumb/c/c7/Saturn_from_Hubble.jpg/300px-Saturn_from_Hubble.jpg)
 
