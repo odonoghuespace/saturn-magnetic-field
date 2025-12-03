@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Saturn Magnetic Field Explorer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: #fff;
+            overflow: hidden;
+        }
+        #canvas-container { width: 100vw; height: 100vh; }
+        #controls {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            background: rgba(20, 20, 30, 0.9);
+            padding: 12px;
+            border-radius: 9px;
+            min-width: 240px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            font-size: 0.75em;
+        }
+        #controls.hidden {
+            transform: translateX(calc(100% + 20px));
+            transition: transform 0.3s ease;
+        }
+        #toggle-controls {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            background: rgba(20, 20, 30, 0.9);
+            border: none;
+            color: #f0d890;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            z-index: 99;
+            font-size: 0.75em;
+            display: none;
+        }
+        h1 {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            color: #f0d890;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #hide-btn {
+            background: none;
+            border: 1px solid #666;
+            color: #aaa;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8em;
+        }
+        .control-group { margin-bottom: 10px; }
+        label { display: block; margin-bottom: 5px; font-size: 0.85em; color: #aaa; }
+        .slider-container { display: flex; align-items: center; gap: 8px; }
+        input[type="range"] {
+            flex: 1;
+            appearance: none;
+            height: 5px;
+            background: #333;
+            border-radius: 2px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #f0d890;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .value-display { min-width: 36px; text-align: right; font-weight: bold; color: #f0d890; }
+        .checkbox-group { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+        .checkbox-group input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
+        .checkbox-group label { margin: 0; cursor: pointer; color: #ddd; }
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.2em;
+            color: #f0d890;
+            z-index: 200;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top-color: #f0d890;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #info { position: fixed; bottom: 15px; left: 15px; font-size: 0.7em; color: #666; }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading Saturn...</div>
+    </div>
+    
+    <button id="toggle-controls">Show Controls</button>
+    
+    <div id="controls" style="display: none;">
+        <h1>Saturn Magnetic Field <button id="hide-btn">Hide</button></h1>
+        
+        <div class="control-group">
+            <label>L-Shell Value</label>
+            <div class="slider-container">
+                <input type="range" id="l-slider" min="0" max="53" value="0" step="1">
+                <span class="value-display" id="l-value">1.1</span>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <label>Longitudes</label>
+            <div class="slider-container">
+                <input type="range" id="longitude-slider" min="1" max="24" value="8" step="1">
+                <span class="value-display" id="longitude-value">8</span>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <label>Line Thickness</label>
+            <div class="slider-container">
+                <input type="range" id="thickness-slider" min="1" max="8" value="2" step="0.5">
+                <span class="value-display" id="thickness-value">2</span>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <div class="checkbox-group">
+                <input type="checkbox" id="show-rings" checked>
+                <label for="show-rings">Show Rings</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="show-enceladus" checked>
+                <label for="show-enceladus">Show Enceladus</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="auto-rotate">
+                <label for="auto-rotate">Auto Rotate</label>
+            </div>
+        </div>
+    </div>
+    
+    <div id="canvas-container"></div>
+    <div id="info">Drag to rotate | Scroll to zoom | Cassini 11 model</div>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+        import { Line2 } from 'three/addons/lines/Line2.js';
+        import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+        import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+        
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000008);
+        
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(12, 6, 12);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+        
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.getElementById('canvas-container').appendChild(labelRenderer.domElement);
+        
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 2;
+        controls.maxDistance = 100;
+        controls.zoomSpeed = 2.0;
+        
+        // Better lighting for Saturn
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        sunLight.position.set(15, 8, 15);
+        scene.add(sunLight);
+        
+        // Add fill light from opposite side
+        const fillLight = new THREE.DirectionalLight(0xffffcc, 0.5);
+        fillLight.position.set(-10, -5, -10);
+        scene.add(fillLight);
+        
+        const fieldLineGroups = new Map();
+        let saturnMesh = null;
+        let ringsMesh = null;
+        let enceladusMesh = null;
+        let enceladusLabel = null;
+        let autoRotate = false;
+        let currentLongitudes = 8;
+        let currentThickness = 2;
+        
+        // Animation state
+        let saturnRotation = 0;
+        let enceladusOrbitAngle = 0;
+        
+        const ENCELADUS_ORBIT_RATIO = 10.656 / 32.885;  // ~0.324
+        
+        const RING_STRUCTURE = [
+            { name: 'D Ring', inner: 1.110, outer: 1.236, opacity: 0.15, brightness: 0.3 },
+            { name: 'C Ring', inner: 1.239, outer: 1.527, opacity: 0.50, brightness: 0.525 },
+            { name: 'B Ring', inner: 1.527, outer: 1.951, opacity: 0.85, brightness: 1.0 },
+            { name: 'Cassini Division', inner: 1.951, outer: 2.023, opacity: 0.05, brightness: 0.15 },
+            { name: 'A Ring', inner: 2.023, outer: 2.270, opacity: 0.65, brightness: 0.7 },
+            { name: 'F Ring', inner: 2.310, outer: 2.330, opacity: 0.4, brightness: 0.5 },
+        ];
+        
+        const ENCELADUS_ORBIT_RADIUS = 3.948;
+        const ENCELADUS_SIZE = 0.08;
+        
+        // Create Saturn texture procedurally with banded colors
+        function createSaturnTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            
+            // Saturn's characteristic colors - golden/tan with subtle bands
+            const bands = [
+                { pos: 0.0, color: '#c4a574' },
+                { pos: 0.1, color: '#d4b584' },
+                { pos: 0.2, color: '#c9a870' },
+                { pos: 0.25, color: '#e0c998' },
+                { pos: 0.35, color: '#d6bc88' },
+                { pos: 0.4, color: '#c4a574' },
+                { pos: 0.45, color: '#e8d4a8' },  // Equatorial band - brighter
+                { pos: 0.5, color: '#f0ddb0' },   // Equator
+                { pos: 0.55, color: '#e8d4a8' },
+                { pos: 0.6, color: '#c4a574' },
+                { pos: 0.65, color: '#d6bc88' },
+                { pos: 0.75, color: '#e0c998' },
+                { pos: 0.8, color: '#c9a870' },
+                { pos: 0.9, color: '#d4b584' },
+                { pos: 1.0, color: '#c4a574' }
+            ];
+            
+            // Draw gradient bands
+            for (let y = 0; y < canvas.height; y++) {
+                const t = y / canvas.height;
+                
+                // Find the two bands we're between
+                let color1, color2, localT;
+                for (let i = 0; i < bands.length - 1; i++) {
+                    if (t >= bands[i].pos && t <= bands[i + 1].pos) {
+                        color1 = bands[i].color;
+                        color2 = bands[i + 1].color;
+                        localT = (t - bands[i].pos) / (bands[i + 1].pos - bands[i].pos);
+                        break;
+                    }
+                }
+                
+                ctx.fillStyle = color1;
+                ctx.fillRect(0, y, canvas.width, 1);
+            }
+            
+            // Add subtle noise/variation
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < imageData.data.length; i += 4) {
+                const noise = (Math.random() - 0.5) * 15;
+                imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+                imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
+                imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));
+            }
+            ctx.putImageData(imageData, 0, 0);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            return texture;
+        }
+        
+        function createSaturn() {
+            const geometry = new THREE.SphereGeometry(1, 64, 32);
+            const positions = geometry.attributes.position;
+            for (let i = 0; i < positions.count; i++) {
+                positions.setY(i, positions.getY(i) * 0.902);
+            }
+            geometry.computeVertexNormals();
+            
+            const saturnTexture = createSaturnTexture();
+            
+            const material = new THREE.MeshStandardMaterial({
+                map: saturnTexture,
+                roughness: 0.8,
+                metalness: 0.1
+            });
+            
+            saturnMesh = new THREE.Mesh(geometry, material);
+            scene.add(saturnMesh);
+            
+            createLatitudeCircle(45);
+            createLatitudeCircle(-45);
+        }
+        
+        function createLatitudeCircle(latitudeDeg) {
+            const latRad = latitudeDeg * Math.PI / 180;
+            const radius = Math.cos(latRad);
+            const y = Math.sin(latRad) * 0.902;
+            
+            const points = [];
+            for (let i = 0; i <= 64; i++) {
+                const theta = (i / 64) * 2 * Math.PI;
+                points.push(new THREE.Vector3(radius * Math.cos(theta), y, radius * Math.sin(theta)));
+            }
+            
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ color: 0xffff00 });
+            scene.add(new THREE.Line(geometry, material));
+        }
+        
+        function createRings() {
+            const ringsGroup = new THREE.Group();
+            
+            RING_STRUCTURE.forEach(ring => {
+                const geometry = new THREE.RingGeometry(ring.inner, ring.outer, 128, 1);
+                geometry.rotateX(-Math.PI / 2);
+                
+                const brightness = Math.floor(ring.brightness * 200 + 55);
+                const color = new THREE.Color(`rgb(${brightness}, ${brightness - 20}, ${brightness - 40})`);
+                
+                const material = new THREE.MeshBasicMaterial({
+                    color: color,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: ring.opacity
+                });
+                
+                ringsGroup.add(new THREE.Mesh(geometry, material));
+            });
+            
+            ringsMesh = ringsGroup;
+            scene.add(ringsMesh);
+        }
+        
+        function createEnceladus() {
+            const geometry = new THREE.SphereGeometry(ENCELADUS_SIZE, 16, 16);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 0.8,
+                emissive: 0x333333
+            });
+            enceladusMesh = new THREE.Mesh(geometry, material);
+            enceladusMesh.position.set(ENCELADUS_ORBIT_RADIUS, 0, 0);
+            scene.add(enceladusMesh);
+            
+            const labelDiv = document.createElement('div');
+            labelDiv.textContent = 'Enceladus';
+            labelDiv.style.cssText = 'color:#fff;font-size:11px;text-shadow:0 0 4px #000;font-weight:bold;';
+            enceladusLabel = new CSS2DObject(labelDiv);
+            enceladusLabel.position.set(0, ENCELADUS_SIZE + 0.1, 0);
+            enceladusMesh.add(enceladusLabel);
+        }
+        
+        let fieldLineData = null;
+        let L_SHELLS_LOADED = [];
+        
+        async function loadFieldLineData() {
+            const loader = document.getElementById('loading');
+            loader.querySelector('div:last-child').textContent = 'Loading Cassini 11 field data...';
+            
+            try {
+                const response = await fetch('field_lines_correct.json');
+                fieldLineData = await response.json();
+                
+                L_SHELLS_LOADED = fieldLineData.l_shells.map(ls => ls.L);
+                console.log('Loaded ' + L_SHELLS_LOADED.length + ' L-shells:', L_SHELLS_LOADED);
+                
+                document.getElementById('l-slider').max = L_SHELLS_LOADED.length - 1;
+                
+                createFieldLinesFromData();
+                
+                loader.style.display = 'none';
+                document.getElementById('controls').style.display = 'block';
+                
+                // Start with L=1.1 (index 0)
+                document.getElementById('l-slider').value = 0;
+                const startL = L_SHELLS_LOADED[0] || 1.1;
+                updateVisibleFieldLines(startL);
+                document.getElementById('l-value').textContent = startL.toFixed(1);
+            } catch (error) {
+                console.error('Failed to load field line data:', error);
+                loader.querySelector('div:last-child').textContent = 'Error: ' + error.message;
+            }
+        }
+        
+        function createFieldLinesFromData() {
+            if (!fieldLineData) return;
+            
+            fieldLineData.l_shells.forEach((lData) => {
+                const L = lData.L;
+                const group = new THREE.Group();
+                group.visible = false;
+                group.userData.L = L;
+                group.userData.allLines = lData.lines;
+                
+                createLinesForGroup(group, currentLongitudes);
+                
+                fieldLineGroups.set(L, group);
+                scene.add(group);
+            });
+            
+            console.log('Created field line groups:', fieldLineGroups.size);
+        }
+        
+        function createLinesForGroup(group, numLongitudes) {
+            while (group.children.length > 0) {
+                const child = group.children[0];
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+                group.remove(child);
+            }
+            
+            const L = group.userData.L;
+            const allLines = group.userData.allLines;
+            if (!allLines || allLines.length === 0) return;
+            
+            const totalLines = allLines.length;
+            
+            for (let i = 0; i < numLongitudes; i++) {
+                const lineIndex = Math.floor((i * totalLines) / numLongitudes) % totalLines;
+                const pointsData = allLines[lineIndex];
+                
+                if (pointsData && pointsData.length > 5) {
+                    // Use Line2 for thick lines
+                    const positions = [];
+                    for (const p of pointsData) {
+                        positions.push(p[0], p[1], p[2]);
+                    }
+                    
+                    const geometry = new LineGeometry();
+                    geometry.setPositions(positions);
+                    
+                    // Color gradient from blue (low L) to red (high L)
+                    const t = Math.min((L - 1.1) / 28.9, 1.0);
+                    const color = new THREE.Color();
+                    color.setHSL(0.65 - t * 0.65, 1.0, 0.55);
+                    
+                    const material = new LineMaterial({
+                        color: color,
+                        linewidth: currentThickness,
+                        resolution: new THREE.Vector2(window.innerWidth, window.innerHeight)
+                    });
+                    
+                    const line = new Line2(geometry, material);
+                    line.computeLineDistances();
+                    group.add(line);
+                }
+            }
+        }
+        
+        function updateLongitudes(numLongitudes) {
+            currentLongitudes = numLongitudes;
+            fieldLineGroups.forEach((group) => {
+                createLinesForGroup(group, numLongitudes);
+            });
+        }
+        
+        function updateThickness(thickness) {
+            currentThickness = thickness;
+            fieldLineGroups.forEach((group) => {
+                group.children.forEach(child => {
+                    if (child.material && child.material.linewidth !== undefined) {
+                        child.material.linewidth = thickness;
+                    }
+                });
+            });
+        }
+        
+        function updateVisibleFieldLines(targetL) {
+            let closestL = null;
+            let closestDist = Infinity;
+            
+            L_SHELLS_LOADED.forEach(L => {
+                const dist = Math.abs(L - targetL);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestL = L;
+                }
+            });
+            
+            fieldLineGroups.forEach((group, L) => {
+                group.visible = (L === closestL);
+            });
+        }
+        
+        function sliderToL(val) {
+            const idx = Math.round(val);
+            return L_SHELLS_LOADED.length > 0 ? L_SHELLS_LOADED[Math.min(idx, L_SHELLS_LOADED.length - 1)] : 1.1;
+        }
+        
+        const lSlider = document.getElementById('l-slider');
+        const lValue = document.getElementById('l-value');
+        const longitudeSlider = document.getElementById('longitude-slider');
+        const longitudeValue = document.getElementById('longitude-value');
+        const thicknessSlider = document.getElementById('thickness-slider');
+        const thicknessValue = document.getElementById('thickness-value');
+        const showRings = document.getElementById('show-rings');
+        const showEnceladus = document.getElementById('show-enceladus');
+        const autoRotateCheckbox = document.getElementById('auto-rotate');
+        const hideBtn = document.getElementById('hide-btn');
+        const toggleBtn = document.getElementById('toggle-controls');
+        const controlsPanel = document.getElementById('controls');
+        
+        lSlider.addEventListener('input', () => {
+            const L = sliderToL(lSlider.value);
+            lValue.textContent = L.toFixed(1);
+            updateVisibleFieldLines(L);
+        });
+        
+        longitudeSlider.addEventListener('input', () => {
+            longitudeValue.textContent = longitudeSlider.value;
+            updateLongitudes(parseInt(longitudeSlider.value));
+        });
+        
+        thicknessSlider.addEventListener('input', () => {
+            const thickness = parseFloat(thicknessSlider.value);
+            thicknessValue.textContent = thickness.toFixed(1);
+            updateThickness(thickness);
+        });
+        
+        showRings.addEventListener('change', () => { if (ringsMesh) ringsMesh.visible = showRings.checked; });
+        showEnceladus.addEventListener('change', () => { 
+            if (enceladusMesh) enceladusMesh.visible = showEnceladus.checked; 
+        });
+        autoRotateCheckbox.addEventListener('change', () => { autoRotate = autoRotateCheckbox.checked; });
+        
+        hideBtn.addEventListener('click', () => {
+            controlsPanel.classList.add('hidden');
+            toggleBtn.style.display = 'block';
+        });
+        
+        toggleBtn.addEventListener('click', () => {
+            controlsPanel.classList.remove('hidden');
+            toggleBtn.style.display = 'none';
+        });
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            
+            // Update line material resolutions
+            fieldLineGroups.forEach((group) => {
+                group.children.forEach(child => {
+                    if (child.material && child.material.resolution) {
+                        child.material.resolution.set(window.innerWidth, window.innerHeight);
+                    }
+                });
+            });
+        });
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (autoRotate) {
+                const saturnSpeed = 0.003;
+                const enceladusSpeed = saturnSpeed * ENCELADUS_ORBIT_RATIO;
+                
+                saturnRotation += saturnSpeed;
+                enceladusOrbitAngle += enceladusSpeed;
+                
+                if (saturnMesh) saturnMesh.rotation.y = saturnRotation;
+                if (ringsMesh) ringsMesh.rotation.y = saturnRotation;
+                
+                fieldLineGroups.forEach(group => {
+                    group.rotation.y = saturnRotation;
+                });
+                
+                if (enceladusMesh) {
+                    enceladusMesh.position.x = ENCELADUS_ORBIT_RADIUS * Math.cos(enceladusOrbitAngle);
+                    enceladusMesh.position.z = ENCELADUS_ORBIT_RADIUS * -Math.sin(enceladusOrbitAngle);
+                }
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+        
+        createSaturn();
+        createRings();
+        createEnceladus();
+        loadFieldLineData();
+        animate();
+    </script>
+</body>
+</html>

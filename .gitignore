@@ -1,0 +1,6 @@
+# Large/unnecessary files
+field_lines.json
+field_lines_web.json
+field_lines_compact.json
+field_lines_web.json.gz
+*.py
