@@ -150,6 +150,10 @@
                 <label for="show-enceladus">Show Enceladus</label>
             </div>
             <div class="checkbox-group">
+                <input type="checkbox" id="show-flux-tube">
+                <label for="show-flux-tube">Show Enceladus Flux Tube</label>
+            </div>
+            <div class="checkbox-group">
                 <input type="checkbox" id="auto-rotate">
                 <label for="auto-rotate">Auto Rotate</label>
             </div>
@@ -219,7 +223,11 @@
         let ringsMesh = null;
         let enceladusMesh = null;
         let enceladusLabel = null;
+        let enceladusLabelDiv = null;
+        let fluxTubeLine = null;
+        let fluxTubeData = null;  // Store the flux tube field line data
         let autoRotate = false;
+        let showFluxTube = false;
         let currentLongitudes = 8;
         let currentThickness = 2;
         
@@ -228,6 +236,7 @@
         let enceladusOrbitAngle = 0;
         
         const ENCELADUS_ORBIT_RATIO = 10.656 / 32.885;  // ~0.324
+        const ENCELADUS_L_SHELL = 3.948;  // Enceladus L-shell
         
         const RING_STRUCTURE = [
             { name: 'D Ring', inner: 1.110, outer: 1.236, opacity: 0.15, brightness: 0.3 },
@@ -256,8 +265,8 @@
                 { pos: 0.25, color: '#e0c998' },
                 { pos: 0.35, color: '#d6bc88' },
                 { pos: 0.4, color: '#c4a574' },
-                { pos: 0.45, color: '#e8d4a8' },  // Equatorial band - brighter
-                { pos: 0.5, color: '#f0ddb0' },   // Equator
+                { pos: 0.45, color: '#e8d4a8' },
+                { pos: 0.5, color: '#f0ddb0' },
                 { pos: 0.55, color: '#e8d4a8' },
                 { pos: 0.6, color: '#c4a574' },
                 { pos: 0.65, color: '#d6bc88' },
@@ -267,26 +276,19 @@
                 { pos: 1.0, color: '#c4a574' }
             ];
             
-            // Draw gradient bands
             for (let y = 0; y < canvas.height; y++) {
                 const t = y / canvas.height;
-                
-                // Find the two bands we're between
-                let color1, color2, localT;
+                let color1;
                 for (let i = 0; i < bands.length - 1; i++) {
                     if (t >= bands[i].pos && t <= bands[i + 1].pos) {
                         color1 = bands[i].color;
-                        color2 = bands[i + 1].color;
-                        localT = (t - bands[i].pos) / (bands[i + 1].pos - bands[i].pos);
                         break;
                     }
                 }
-                
                 ctx.fillStyle = color1;
                 ctx.fillRect(0, y, canvas.width, 1);
             }
             
-            // Add subtle noise/variation
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             for (let i = 0; i < imageData.data.length; i += 4) {
                 const noise = (Math.random() - 0.5) * 15;
@@ -375,12 +377,86 @@
             enceladusMesh.position.set(ENCELADUS_ORBIT_RADIUS, 0, 0);
             scene.add(enceladusMesh);
             
-            const labelDiv = document.createElement('div');
-            labelDiv.textContent = 'Enceladus';
-            labelDiv.style.cssText = 'color:#fff;font-size:11px;text-shadow:0 0 4px #000;font-weight:bold;';
-            enceladusLabel = new CSS2DObject(labelDiv);
+            enceladusLabelDiv = document.createElement('div');
+            enceladusLabelDiv.textContent = 'Enceladus';
+            enceladusLabelDiv.style.cssText = 'color:#fff;font-size:11px;text-shadow:0 0 4px #000;font-weight:bold;';
+            enceladusLabel = new CSS2DObject(enceladusLabelDiv);
             enceladusLabel.position.set(0, ENCELADUS_SIZE + 0.1, 0);
             enceladusMesh.add(enceladusLabel);
+        }
+        
+        // Find and store the flux tube data (field line at Enceladus L-shell)
+        function findFluxTubeData() {
+            if (!fieldLineData) return null;
+            
+            // Find the L-shell closest to Enceladus (3.948)
+            let closestL = null;
+            let closestDist = Infinity;
+            let closestData = null;
+            
+            for (const lData of fieldLineData.l_shells) {
+                const dist = Math.abs(lData.L - ENCELADUS_L_SHELL);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestL = lData.L;
+                    closestData = lData;
+                }
+            }
+            
+            console.log('Found flux tube L-shell:', closestL);
+            return closestData;
+        }
+        
+        // Create the flux tube line at current Enceladus longitude
+        function createFluxTube() {
+            if (!fluxTubeData || !fluxTubeData.lines || fluxTubeData.lines.length === 0) return;
+            
+            // Remove existing flux tube
+            if (fluxTubeLine) {
+                if (fluxTubeLine.geometry) fluxTubeLine.geometry.dispose();
+                if (fluxTubeLine.material) fluxTubeLine.material.dispose();
+                scene.remove(fluxTubeLine);
+                fluxTubeLine = null;
+            }
+            
+            // Use the first field line as template (will be rotated to match Enceladus)
+            const lineData = fluxTubeData.lines[0];
+            if (!lineData || lineData.length < 5) return;
+            
+            const positions = [];
+            for (const p of lineData) {
+                positions.push(p[0], p[1], p[2]);
+            }
+            
+            const geometry = new LineGeometry();
+            geometry.setPositions(positions);
+            
+            // Bright cyan-green color for flux tube (like your Blender version)
+            const material = new LineMaterial({
+                color: 0x33ff88,
+                linewidth: 4,
+                resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+                transparent: true,
+                opacity: 0.9
+            });
+            
+            fluxTubeLine = new Line2(geometry, material);
+            fluxTubeLine.computeLineDistances();
+            fluxTubeLine.visible = showFluxTube;
+            
+            // Position at Enceladus longitude
+            updateFluxTubePosition();
+            
+            scene.add(fluxTubeLine);
+        }
+        
+        // Update flux tube rotation to match Enceladus position
+        function updateFluxTubePosition() {
+            if (!fluxTubeLine) return;
+            
+            // Rotate the flux tube to match Enceladus longitude
+            // The field line data is generated at longitude 0, so rotate by Enceladus orbit angle
+            fluxTubeLine.rotation.y = enceladusOrbitAngle;
         }
         
         let fieldLineData = null;
@@ -400,6 +476,10 @@
                 document.getElementById('l-slider').max = L_SHELLS_LOADED.length - 1;
                 
                 createFieldLinesFromData();
+                
+                // Find and create flux tube
+                fluxTubeData = findFluxTubeData();
+                createFluxTube();
                 
                 loader.style.display = 'none';
                 document.getElementById('controls').style.display = 'block';
@@ -453,7 +533,6 @@
                 const pointsData = allLines[lineIndex];
                 
                 if (pointsData && pointsData.length > 5) {
-                    // Use Line2 for thick lines
                     const positions = [];
                     for (const p of pointsData) {
                         positions.push(p[0], p[1], p[2]);
@@ -462,7 +541,6 @@
                     const geometry = new LineGeometry();
                     geometry.setPositions(positions);
                     
-                    // Color gradient from blue (low L) to red (high L)
                     const t = Math.min((L - 1.1) / 28.9, 1.0);
                     const color = new THREE.Color();
                     color.setHSL(0.65 - t * 0.65, 1.0, 0.55);
@@ -528,6 +606,7 @@
         const thicknessValue = document.getElementById('thickness-value');
         const showRings = document.getElementById('show-rings');
         const showEnceladus = document.getElementById('show-enceladus');
+        const showFluxTubeCheckbox = document.getElementById('show-flux-tube');
         const autoRotateCheckbox = document.getElementById('auto-rotate');
         const hideBtn = document.getElementById('hide-btn');
         const toggleBtn = document.getElementById('toggle-controls');
@@ -550,11 +629,26 @@
             updateThickness(thickness);
         });
         
-        showRings.addEventListener('change', () => { if (ringsMesh) ringsMesh.visible = showRings.checked; });
-        showEnceladus.addEventListener('change', () => { 
-            if (enceladusMesh) enceladusMesh.visible = showEnceladus.checked; 
+        showRings.addEventListener('change', () => { 
+            if (ringsMesh) ringsMesh.visible = showRings.checked; 
         });
-        autoRotateCheckbox.addEventListener('change', () => { autoRotate = autoRotateCheckbox.checked; });
+        
+        showEnceladus.addEventListener('change', () => { 
+            if (enceladusMesh) enceladusMesh.visible = showEnceladus.checked;
+            // Also hide/show the label
+            if (enceladusLabelDiv) {
+                enceladusLabelDiv.style.display = showEnceladus.checked ? 'block' : 'none';
+            }
+        });
+        
+        showFluxTubeCheckbox.addEventListener('change', () => {
+            showFluxTube = showFluxTubeCheckbox.checked;
+            if (fluxTubeLine) fluxTubeLine.visible = showFluxTube;
+        });
+        
+        autoRotateCheckbox.addEventListener('change', () => { 
+            autoRotate = autoRotateCheckbox.checked; 
+        });
         
         hideBtn.addEventListener('click', () => {
             controlsPanel.classList.add('hidden');
@@ -572,7 +666,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             labelRenderer.setSize(window.innerWidth, window.innerHeight);
             
-            // Update line material resolutions
             fieldLineGroups.forEach((group) => {
                 group.children.forEach(child => {
                     if (child.material && child.material.resolution) {
@@ -580,6 +673,10 @@
                     }
                 });
             });
+            
+            if (fluxTubeLine && fluxTubeLine.material && fluxTubeLine.material.resolution) {
+                fluxTubeLine.material.resolution.set(window.innerWidth, window.innerHeight);
+            }
         });
         
         function animate() {
@@ -603,6 +700,9 @@
                     enceladusMesh.position.x = ENCELADUS_ORBIT_RADIUS * Math.cos(enceladusOrbitAngle);
                     enceladusMesh.position.z = ENCELADUS_ORBIT_RADIUS * -Math.sin(enceladusOrbitAngle);
                 }
+                
+                // Update flux tube to follow Enceladus
+                updateFluxTubePosition();
             }
             
             controls.update();
