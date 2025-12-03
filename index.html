@@ -184,7 +184,7 @@
         scene.background = new THREE.Color(0x000008);
         
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(12, 6, 12);
+        camera.position.set(35, 18, 35);  // Zoomed out for L=20
         
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -223,7 +223,6 @@
         let ringsMesh = null;
         let enceladusMesh = null;
         let enceladusLabel = null;
-        let enceladusLabelDiv = null;
         let fluxTubeLine = null;
         let fluxTubeData = null;  // Store the flux tube field line data
         let autoRotate = false;
@@ -340,6 +339,15 @@
             const geometry = new THREE.BufferGeometry().setFromPoints(points);
             const material = new THREE.LineBasicMaterial({ color: 0xffff00 });
             scene.add(new THREE.Line(geometry, material));
+            
+            // Add latitude label
+            const labelDiv = document.createElement('div');
+            labelDiv.textContent = latitudeDeg > 0 ? `${latitudeDeg}°N` : `${Math.abs(latitudeDeg)}°S`;
+            labelDiv.style.cssText = 'color:#ffff00;font-size:12px;text-shadow:0 0 4px #000;font-weight:bold;';
+            const label = new CSS2DObject(labelDiv);
+            // Position label at front of planet (z = radius)
+            label.position.set(0, y + 0.15, radius + 0.1);
+            scene.add(label);
         }
         
         function createRings() {
@@ -377,10 +385,10 @@
             enceladusMesh.position.set(ENCELADUS_ORBIT_RADIUS, 0, 0);
             scene.add(enceladusMesh);
             
-            enceladusLabelDiv = document.createElement('div');
-            enceladusLabelDiv.textContent = 'Enceladus';
-            enceladusLabelDiv.style.cssText = 'color:#fff;font-size:11px;text-shadow:0 0 4px #000;font-weight:bold;';
-            enceladusLabel = new CSS2DObject(enceladusLabelDiv);
+            const labelDiv = document.createElement('div');
+            labelDiv.textContent = 'Enceladus';
+            labelDiv.style.cssText = 'color:#fff;font-size:11px;text-shadow:0 0 4px #000;font-weight:bold;';
+            enceladusLabel = new CSS2DObject(labelDiv);
             enceladusLabel.position.set(0, ENCELADUS_SIZE + 0.1, 0);
             enceladusMesh.add(enceladusLabel);
         }
@@ -444,9 +452,6 @@
             fluxTubeLine.computeLineDistances();
             fluxTubeLine.visible = showFluxTube;
             
-            // Position at Enceladus longitude
-            updateFluxTubePosition();
-            
             scene.add(fluxTubeLine);
         }
         
@@ -454,8 +459,8 @@
         function updateFluxTubePosition() {
             if (!fluxTubeLine) return;
             
-            // Rotate the flux tube to match Enceladus longitude
-            // The field line data is generated at longitude 0, so rotate by Enceladus orbit angle
+            // The flux tube rotates with Saturn's field (synced to Saturn rotation)
+            // but its longitude follows Enceladus
             fluxTubeLine.rotation.y = enceladusOrbitAngle;
         }
         
@@ -484,9 +489,17 @@
                 loader.style.display = 'none';
                 document.getElementById('controls').style.display = 'block';
                 
-                // Start with L=1.1 (index 0)
-                document.getElementById('l-slider').value = 0;
-                const startL = L_SHELLS_LOADED[0] || 1.1;
+                // Find L=20 index and start there
+                let startIndex = 0;
+                for (let i = 0; i < L_SHELLS_LOADED.length; i++) {
+                    if (L_SHELLS_LOADED[i] >= 20) {
+                        startIndex = i;
+                        break;
+                    }
+                }
+                
+                document.getElementById('l-slider').value = startIndex;
+                const startL = L_SHELLS_LOADED[startIndex] || 20;
                 updateVisibleFieldLines(startL);
                 document.getElementById('l-value').textContent = startL.toFixed(1);
             } catch (error) {
@@ -635,9 +648,9 @@
         
         showEnceladus.addEventListener('change', () => { 
             if (enceladusMesh) enceladusMesh.visible = showEnceladus.checked;
-            // Also hide/show the label
-            if (enceladusLabelDiv) {
-                enceladusLabelDiv.style.display = showEnceladus.checked ? 'block' : 'none';
+            // Also hide/show the label using CSS2DObject's visible property
+            if (enceladusLabel) {
+                enceladusLabel.visible = showEnceladus.checked;
             }
         });
         
